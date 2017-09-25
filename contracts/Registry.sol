@@ -68,23 +68,24 @@ contract Registry {
 
     //Allow a user to start an application
     //take tokens from user and set apply stage end time
-    function apply(string domain, uint amount) external {
-        require(!isWhitelisted(domain));
-        require(!appExists(domain));
-        require(amount >= parameterizer.get("minDeposit"));
+    function apply(string _domain, uint _amount) external {
+        bytes32 domainHash = sha3(_domain);
+        require(!isWhitelisted(domainHash));
+        require(!appExists(domainHash));
+        require(_amount >= parameterizer.get("minDeposit"));
 
         //set owner
-        Listing storage listing = listingMap[sha3(domain)];
+        Listing storage listing = listingMap[domainHash];
         listing.owner = msg.sender; 
 
         //transfer tokens
-        require(token.transferFrom(listing.owner, this, amount)); 
+        require(token.transferFrom(listing.owner, this, _amount)); 
 
         //set apply stage end time
         listing.applicationExpiry = block.timestamp + parameterizer.get("applyStageLen"); 
-        listing.unstakedDeposit = amount;
+        listing.unstakedDeposit = _amount;
 
-        _Application(domain, amount);
+        _Application(_domain, _amount);
     }
 
     //Allow the owner of a domain in the listing to increase their deposit
@@ -118,16 +119,17 @@ contract Registry {
 
     //Allow the owner of a domain to remove the domain from the whitelist
     //Return all tokens to the owner
-    function exit(string domain) external {
-        Listing storage listing = listingMap[sha3(domain)];
+    function exit(string _domain) external {
+        bytes32 domainHash = sha3(_domain);
+        Listing storage listing = listingMap[domainHash];
 
         require(msg.sender == listing.owner);
-        require(isWhitelisted(domain));
+        require(isWhitelisted(domainHash));
         // cannot exit during ongoing challenge
         require(listing.challengeID == 0 || challengeMap[listing.challengeID].resolved);
 
         //remove domain & return tokens
-        resetListing(domain);
+        resetListing(domainHash);
     }
 
     // -----------------------
@@ -140,13 +142,13 @@ contract Registry {
         bytes32 domainHash = sha3(domain);
         Listing storage listing = listingMap[domainHash];
         //to be challenged, domain must be in apply stage or already on the whitelist
-        require(appExists(domain) || listing.whitelisted); 
+        require(appExists(domainHash) || listing.whitelisted); 
         // prevent multiple challenges
         require(listing.challengeID == 0 || challengeMap[listing.challengeID].resolved);
         uint deposit = parameterizer.get("minDeposit");
         if (listing.unstakedDeposit < deposit) {
             // not enough tokens, publisher auto-delisted
-            resetListing(domain);
+            resetListing(domainHash);
             return 0;
         }
         //take tokens from challenger
@@ -178,11 +180,12 @@ contract Registry {
     @param _domain The domain whose status is being updated
     */
     function updateStatus(string _domain) public {
-        if (canBeWhitelisted(_domain)) {
-          whitelistApplication(_domain);
+        bytes32 domainHash = sha3(_domain);
+        if (canBeWhitelisted(domainHash)) {
+          whitelistApplication(domainHash);
           _NewDomainWhitelisted(_domain);
-        } else if (challengeCanBeResolved(_domain)) {
-          resolveChallenge(_domain);
+        } else if (challengeCanBeResolved(domainHash)) {
+          resolveChallenge(_domain, domainHash);
         } else {
           revert();
         }
@@ -237,15 +240,14 @@ contract Registry {
 
     /**
     @dev determines whether a domain is an application which can be whitelisted
-    @param _domain the domain whose status should be examined
+    @param _domainHash the domain whose status should be examined
     */
-    function canBeWhitelisted(string _domain) constant public returns (bool) {
-      bytes32 domainHash = sha3(_domain);
-      uint challengeID = listingMap[domainHash].challengeID;
+    function canBeWhitelisted(bytes32 _domainHash) constant public returns (bool) {
+      uint challengeID = listingMap[_domainHash].challengeID;
 
       // TODO: change name of appExists to appWasMade.
-      if (appExists(_domain) && isExpired(listingMap[domainHash].applicationExpiry) &&
-          !isWhitelisted(_domain) &&
+      if (appExists(_domainHash) && isExpired(listingMap[_domainHash].applicationExpiry) &&
+          !isWhitelisted(_domainHash) &&
           (challengeID == 0 || challengeMap[challengeID].resolved == true))
       { return true; }
 
@@ -253,32 +255,30 @@ contract Registry {
     }
 
     //return true if domain is whitelisted
-    function isWhitelisted(string domain) constant public returns (bool whitelisted) {
-        return listingMap[sha3(domain)].whitelisted;
+    function isWhitelisted(bytes32 _domainHash) constant public returns (bool whitelisted) {
+        return listingMap[_domainHash].whitelisted;
     } 
 
     //return true if apply(domain) was called for this domain
-    function appExists(string domain) constant public returns (bool exists) {
-        return listingMap[sha3(domain)].applicationExpiry > 0;
+    function appExists(bytes32 _domainHash) constant public returns (bool exists) {
+        return listingMap[_domainHash].applicationExpiry > 0;
     }
 
     // return true if the listing has an unresolved challenge
-    function challengeExists(string _domain) constant public returns (bool) {
-        bytes32 domainHash = sha3(_domain);
-        uint challengeID = listingMap[domainHash].challengeID;
+    function challengeExists(bytes32 _domainHash) constant public returns (bool) {
+        uint challengeID = listingMap[_domainHash].challengeID;
 
-        return (listingMap[domainHash].challengeID > 0 && !challengeMap[challengeID].resolved);
+        return (listingMap[_domainHash].challengeID > 0 && !challengeMap[challengeID].resolved);
     }
 
     /**
     @notice determines whether voting has concluded in a challenge for a given domain. Throws if no challenge exists.
-    @param _domain a domain with an unresolved challenge
+    @param _domainHash a domain with an unresolved challenge
     */
-    function challengeCanBeResolved(string _domain) constant public returns (bool) {
-        bytes32 domainHash = sha3(_domain);
-        uint challengeID = listingMap[domainHash].challengeID;
+    function challengeCanBeResolved(bytes32 _domainHash) constant public returns (bool) {
+        uint challengeID = listingMap[_domainHash].challengeID;
 
-        require(challengeExists(_domain));
+        require(challengeExists(_domainHash));
 
         return voting.pollEnded(challengeID);
     }
@@ -289,13 +289,12 @@ contract Registry {
     }
 
     //delete listing from whitelist and return tokens to owner
-    function resetListing(string domain) internal {
-        bytes32 domainHash = sha3(domain);
-        Listing storage listing = listingMap[domainHash];
+    function resetListing(bytes32 _domainHash) internal {
+        Listing storage listing = listingMap[_domainHash];
         //transfer any remaining balance back to the owner
         if (listing.unstakedDeposit > 0)
             require(token.transfer(listing.owner, listing.unstakedDeposit));
-        delete listingMap[domainHash];
+        delete listingMap[_domainHash];
     }
 
     // ----------------
@@ -306,23 +305,22 @@ contract Registry {
     @dev determines the winner in a challenge, rewards them tokens, and either whitelists or de-whitelists the domain
     @param _domain a domain with an unresolved challenge
     */
-    function resolveChallenge(string _domain) private {
-        bytes32 domainHash = sha3(_domain);
-        uint challengeID = listingMap[domainHash].challengeID;
+    function resolveChallenge(string _domain, bytes32 _domainHash) private {
+        uint challengeID = listingMap[_domainHash].challengeID;
 
         // winner gets back their full staked deposit, and dispensationPct*loser's stake
         uint reward = (2 * challengeMap[challengeID].stake) - challengeMap[challengeID].rewardPool;
-        bool wasWhitelisted = isWhitelisted(_domain);
+        bool wasWhitelisted = isWhitelisted(_domainHash);
 
         if (voting.isPassed(challengeID)) { // The challenge failed
-            whitelistApplication(_domain);
-            listingMap[domainHash].unstakedDeposit += reward; // give stake back to applicant
+            whitelistApplication(_domainHash);
+            listingMap[_domainHash].unstakedDeposit += reward; // give stake back to applicant
 
             _ChallengeFailed(challengeID);
             if (!wasWhitelisted) { _NewDomainWhitelisted(_domain); }
         } 
         else { // The challenge succeeded
-            resetListing(_domain);
+            resetListing(_domainHash);
             require(token.transfer(challengeMap[challengeID].challenger, reward));
 
             _ChallengeSucceeded(challengeID);
@@ -340,11 +338,9 @@ contract Registry {
 
     /**
     @dev Called by updateStatus if the applicationExpiry date passed without a challenge being made
-    @param _domain the domainHash to whitelist
+    @param _domainHash the domainHash to whitelist
     */
-    function whitelistApplication(string _domain) private {
-        bytes32 domainHash = sha3(_domain);
-
-        listingMap[domainHash].whitelisted = true;
+    function whitelistApplication(bytes32 _domainHash) private {
+        listingMap[_domainHash].whitelisted = true;
     }
 }
