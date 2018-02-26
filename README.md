@@ -1,9 +1,26 @@
+# UPDATE: DO NOT USE THIS REPO
+## We will be using this forked off generalized version of the adChain Registry repo:
+
+[https://github.com/skmgoldin/tcr](https://github.com/skmgoldin/tcr)
+
+#### Our adChain Registry dApp will expect the apply function to supply the `domain` in the `_data` param in the apply function. The dApp will also make sure `_listingHash` matches the `domain` supplied in the `_data` paramfor the apply function.
+```
+function apply(bytes32 _listingHash, uint _amount, string _data) external
+```
+#### For hashing the `_listingHash`, we are using the `soliditySHA3` function from:
+
+[https://github.com/ethereumjs/ethereumjs-abi](https://github.com/ethereumjs/ethereumjs-abi)
+
+```
+const abi = require('ethereumjs-abi')
+0x${abi.soliditySHA3(['bytes32'], [domain.toLowerCase().trim()]).toString('hex')}
+```
+
 # AdChainRegistry
 
 [ ![Codeship Status for AdChain/AdChainRegistry](https://app.codeship.com/projects/3bdda690-6405-0135-6105-4ab105608534/status?branch=master)](https://app.codeship.com/projects/240253)
 
 A token-curated registry listing the domains of high-quality web publishers with authentic human audiences.
-
 
 ## Commands
 
